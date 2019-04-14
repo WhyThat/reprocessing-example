@@ -13,52 +13,148 @@ type fruit = {
   slicedImage: (imageT, imageT),
 };
 
+type fruitType =
+  | Banana
+  | Apple
+  | Orange
+  | Pineapple
+  | Watermelon
+  | Coconut;
+
+type sliceType =
+  | LeftHalf
+  | RightHalf;
+
+type kind =
+  | Fruit(fruitType)
+  | Slice(fruitType, sliceType)
+  | Bomb;
+
+type vector2 = (float, float);
+
+type gameObject = {
+  pos: vector2,
+  velocity: vector2,
+  image: imageT,
+  kind,
+};
+
 type gameState = {
-  fruitImages: array(imageT),
-  slicedFruitImages: array((imageT, imageT)),
-  fruits: list(fruit),
-  slicedFruits: list(fruit),
+  fruitImages: list((fruitType, imageT)),
+  slicedFruitImages: list((fruitType, (imageT, imageT))),
+  gameObjects: list(gameObject),
   background: imageT,
+  bombImage: imageT,
   mousePressed: bool,
   lastWave: float,
   time: float,
+  blade: list(vector2),
 };
 
-let files = [|"apple", "banana", "coconut", "orange", "pineapple", "watermelon"|];
+let getFruitAssetName = fruit =>
+  switch (fruit) {
+  | Banana => "banana"
+  | Apple => "apple"
+  | Orange => "orange"
+  | Pineapple => "pineapple"
+  | Watermelon => "watermelon"
+  | Coconut => "coconut"
+  };
+
+let getGameObjectAssetPath = go => {
+  let basePath =
+    switch (go) {
+    | Fruit(fruitType) => getFruitAssetName(fruitType)
+    | Slice(fruitType, LeftHalf) => getFruitAssetName(fruitType) ++ "_half_1"
+    | Slice(fruitType, RightHalf) => getFruitAssetName(fruitType) ++ "_half_2"
+    | Bomb => "bomb"
+    };
+  "./src/assets/" ++ basePath ++ ".png";
+};
+
+let files = [Banana, Apple, Orange, Pineapple, Watermelon, Coconut];
 
 let loadFruits = env =>
-  files |> Array.map(file => Draw.loadImage(~filename="./src/assets/" ++ file ++ ".png", ~isPixel=true, env));
+  files
+  |> List.map(fruitType =>
+       (fruitType, Draw.loadImage(~filename=getGameObjectAssetPath(Fruit(fruitType)), ~isPixel=true, env))
+     );
 
 let loadSlicedFruits = env =>
   files
-  |> Array.map(file =>
+  |> List.map(fruitType =>
        (
-         Draw.loadImage(~filename="./src/assets/" ++ file ++ "_half_1.png", ~isPixel=true, env),
-         Draw.loadImage(~filename="./src/assets/" ++ file ++ "_half_2.png", ~isPixel=true, env),
+         fruitType,
+         (
+           Draw.loadImage(~filename=getGameObjectAssetPath(Slice(fruitType, LeftHalf)), ~isPixel=true, env),
+           Draw.loadImage(~filename=getGameObjectAssetPath(Slice(fruitType, RightHalf)), ~isPixel=true, env),
+         ),
        )
      );
 
-let generateFruit = (fruitImages, slicedFruitImages) => {
+let getImageInList = (imageList, key) =>
+  imageList
+  |> List.find(((t, _)) => t == key)
+  |> (
+    fun
+    | (_, image) => image
+  );
+
+let getRandomFruitType = () =>
+  switch (Utils.random(~min=0, ~max=List.length(files) - 1)) {
+  | 0 => Banana
+  | 1 => Apple
+  | 2 => Orange
+  | 3 => Pineapple
+  | 4 => Watermelon
+  | 5 => Coconut
+  | _ => Banana
+  };
+
+let generateFruit = (fruitImages, bombImage) => {
   let posX = Utils.randomf(~min=0., ~max=float_of_int(screenWidth));
   let isInLeftHalf = posX <= float_of_int(screenWidth) /. 2.;
-  let fruitIndex = Utils.random(~min=0, ~max=Array.length(fruitImages));
+  let fruitType = getRandomFruitType();
+  let kind =
+    switch (Utils.random(~min=0, ~max=10)) {
+    | 0 => Bomb
+    | _ => Fruit(fruitType)
+    };
   {
-    image: fruitImages[fruitIndex],
-    slicedImage: slicedFruitImages[fruitIndex],
+    image:
+      switch (kind) {
+      | Fruit(fruitType) => getImageInList(fruitImages, fruitType)
+      | _ => bombImage
+      },
     pos: (posX, float_of_int(screenHeight)),
     velocity: (
-      Utils.randomf(~min=isInLeftHalf ? 0. : (-7.), ~max=isInLeftHalf ? 7. : 0.),
+      Utils.randomf(~min=isInLeftHalf ? 0. : (-5.), ~max=isInLeftHalf ? 5. : 0.),
       Utils.randomf(~min=-20., ~max=-15.),
     ),
+    kind,
   };
 };
 
-let generateSlicedFruit = fruit => {
-  let (firstHalf, secondHalf) = fruit.slicedImage;
+let rec generateNFruits = (size, fruitList, fruitImages, bombImage) =>
+  size > 0
+    ? [generateFruit(fruitImages, bombImage), ...generateNFruits(size - 1, fruitList, fruitImages, bombImage)]
+    : fruitList;
+
+let generateSlicedFruit = (fruit, slicedFruitImages) => {
+  let (firstHalf, secondHalf) =
+    switch (fruit.kind) {
+    | Fruit(fruitType) => getImageInList(slicedFruitImages, fruitType)
+    | _ => getImageInList(slicedFruitImages, Banana)
+    };
   let (velX, velY) = fruit.velocity;
+  let fruitType =
+    switch (fruit.kind) {
+    | Fruit(fruitType) => fruitType
+    | _ => Banana
+    };
   [
-    {...fruit, image: firstHalf, velocity: (velX -. 2., velY +. 1.)},
-    {...fruit, image: secondHalf, velocity: (velX +. 2., velY -. 1.)},
+    {...fruit, image: firstHalf, velocity: (velX -. 2., velY +. 1.), kind: Slice(fruitType, LeftHalf)},
+    {...fruit, image: secondHalf, velocity: (velX +. 2., velY -. 1.), kind: Slice(fruitType, RightHalf)},
   ];
 };
 
@@ -70,77 +166,106 @@ let setup = env => {
     fruitImages,
     slicedFruitImages,
     background: Draw.loadImage(~filename="./src/assets/background.png", ~isPixel=true, env),
-    fruits: [],
-    slicedFruits: [],
+    bombImage: Draw.loadImage(~filename="./src/assets/bomb.png", ~isPixel=true, env),
+    gameObjects: [],
     mousePressed: false,
     lastWave: 0.,
     time: 0.,
+    blade: [],
   };
 };
 
-let renderFruits = (fruits, env) => {
-  fruits
-  |> List.iter(fruit => {
-       let (x, y) = fruit.pos;
-       Draw.image(fruit.image, ~pos=(int_of_float(x), int_of_float(y)), ~width=fruitSize, ~height=fruitSize, env);
+let renderGameObject = (gmaeObjects, env) => {
+  gmaeObjects
+  |> List.iter(gameObject => {
+       let (x, y) = gameObject.pos;
+       Draw.image(
+         gameObject.image,
+         ~pos=(int_of_float(x), int_of_float(y)),
+         ~width=fruitSize,
+         ~height=fruitSize,
+         env,
+       );
      });
 };
 
+let getMouseF = env =>
+  switch (Env.pmouse(env)) {
+  | (x, y) => (float_of_int(x), float_of_int(y))
+  };
+
 let isMouseIn = ((x, y), env) => {
-  let (mouseX, mouseY) =
-    switch (Env.pmouse(env)) {
-    | (x, y) => (float_of_int(x), float_of_int(y))
-    };
+  let (mouseX, mouseY) = getMouseF(env);
   mouseX >= x && mouseX <= x +. float_of_int(fruitSize) && mouseY >= y && mouseY <= y +. float_of_int(fruitSize);
 };
 
-let updateFruits = (fruits, env) =>
-  fruits
-  |> List.map(fruit => {
-       let (x, y) = fruit.pos;
-       let (velX, velY) = fruit.velocity;
+let updateGameObjects = gameObjects =>
+  gameObjects
+  |> List.map(gameObject => {
+       let (x, y) = gameObject.pos;
+       let (velX, velY) = gameObject.velocity;
        let newVelY = velY +. gravity;
-       {...fruit, pos: (x +. velX, y +. velY), velocity: (velX, newVelY)};
+       {...gameObject, pos: (x +. velX, y +. velY), velocity: (velX, newVelY)};
      })
-  |> List.filter(fruit => {
-       let (_, y) = fruit.pos;
+  |> List.filter(gameObject => {
+       let (_, y) = gameObject.pos;
        y <= float_of_int(screenHeight);
      });
 
-let rec generateNFruits = (size, fruitList, fruitImages, slicedFruitImages) =>
-  size > 0
-    ? [
-      generateFruit(fruitImages, slicedFruitImages),
-      ...generateNFruits(size - 1, fruitList, fruitImages, slicedFruitImages),
-    ]
-    : fruitList;
-
 let draw = (state, env) => {
   Draw.image(state.background, ~pos=(0, 0), env);
-  renderFruits(state.fruits, env);
-  renderFruits(state.slicedFruits, env);
+  state.blade
+  |> List.iteri((i, point) =>
+       Draw.linef(
+         ~p1=i >= List.length(state.blade) - 1 ? getMouseF(env) : List.nth(state.blade, i + 1),
+         ~p2=point,
+         env,
+       )
+     );
+  renderGameObject(state.gameObjects, env);
 
   let time = state.time +. Env.deltaTime(env);
   let launchWave = state.time > state.lastWave +. fruitTimer;
+  let fruits =
+    state.gameObjects
+    |> List.filter(gameObject =>
+         gameObject.kind
+         |> (
+           fun
+           | Fruit(_) => true
+           | _ => false
+         )
+       );
+  let bombs = state.gameObjects |> List.filter(gameObject => gameObject.kind == Bomb);
 
   let slicedFruits =
-    state.fruits
-    |> List.filter(fruit => isMouseIn(fruit.pos, env))
-    |> List.fold_left((acc, fruit) => List.concat([acc, generateSlicedFruit(fruit)]), state.slicedFruits);
-  Draw.text(~body=string_of_int(List.length(slicedFruits)), ~pos=(0, 0), env);
+    fruits
+    |> List.fold_left(
+         (acc, fruit) =>
+           isMouseIn(fruit.pos, env) ? acc @ generateSlicedFruit(fruit, state.slicedFruitImages) : acc,
+         state.gameObjects
+         |> List.filter(gameObject =>
+              switch (gameObject.kind) {
+              | Slice(_, __) => true
+              | _ => false
+              }
+            ),
+       );
+  Draw.text(~body=string_of_int(List.length(state.blade)), ~pos=(0, 0), env);
 
   let newFruits =
-    launchWave
-      ? generateNFruits(Utils.random(~min=1, ~max=5), state.fruits, state.fruitImages, state.slicedFruitImages)
-      : state.fruits;
+    (launchWave ? generateNFruits(Utils.random(~min=1, ~max=5), fruits, state.fruitImages, state.bombImage) : fruits)
+    |> List.filter(fruit => !isMouseIn(fruit.pos, env));
+
+  let newBlade = List.append(state.blade, [getMouseF(env)]);
 
   let newState = {
     ...state,
     time,
     lastWave: launchWave ? time : state.lastWave,
     mousePressed: Env.mousePressed(env),
-    slicedFruits: updateFruits(slicedFruits, env),
-    fruits: updateFruits(newFruits |> List.filter(fruit => !isMouseIn(fruit.pos, env)), env),
+    gameObjects: updateGameObjects(List.concat([newFruits, slicedFruits, bombs])),
+    blade: List.length(newBlade) > 6 ? List.tl(newBlade) : newBlade,
   };
 
   newState;
