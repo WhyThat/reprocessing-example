@@ -21,7 +21,8 @@ type sliceType =
 type kind =
   | Fruit(fruitType)
   | Slice(fruitType, sliceType)
-  | Bomb;
+  | Bomb
+  | Explosion;
 
 type vector2 = (float, float);
 
@@ -39,6 +40,7 @@ type gameState = {
   slicedFruitImages: list((fruitType, (imageT, imageT))),
   gameObjects: list(gameObject),
   background: imageT,
+  explosionImage: imageT,
   bombImage: imageT,
   mousePressed: bool,
   lastWave: float,
@@ -64,6 +66,7 @@ let getGameObjectAssetPath = go => {
     | Slice(fruitType, RightHalf) =>
       getFruitAssetName(fruitType) ++ "_half_2"
     | Bomb => "bomb"
+    | Explosion => "explosion"
     };
   "./src/assets/" ++ basePath ++ ".png";
 };
@@ -200,8 +203,18 @@ let setup = env => {
         ~isPixel=true,
         env,
       ),
+    explosionImage:
+      Draw.loadImage(
+        ~filename=getGameObjectAssetPath(Explosion),
+        ~isPixel=true,
+        env,
+      ),
     bombImage:
-      Draw.loadImage(~filename="./src/assets/bomb.png", ~isPixel=true, env),
+      Draw.loadImage(
+        ~filename=getGameObjectAssetPath(Bomb),
+        ~isPixel=true,
+        env,
+      ),
     gameObjects: [],
     mousePressed: false,
     lastWave: 0.,
@@ -249,17 +262,19 @@ let isMouseIn = ((x, y), env) => {
   /. 2.;
 };
 
-let updateFruits = (slicedFruitImages, env, gameObjects) =>
+let updateFruits = (slicedFruitImages, explosionImage, env, gameObjects) =>
   gameObjects
   |> List.fold_left(
        (acc, gameObject) =>
-         switch (gameObject.kind) {
-         | Fruit(_) =>
-           Env.mousePressed(env) && isMouseIn(gameObject.pos, env) ?
-             acc @ generateSlicedFruit(gameObject, slicedFruitImages) :
-             acc @ [gameObject]
-         | _ => acc @ [gameObject]
-         },
+         Env.mousePressed(env) && isMouseIn(gameObject.pos, env) ?
+           switch (gameObject.kind) {
+           | Fruit(_) =>
+             acc @ generateSlicedFruit(gameObject, slicedFruitImages)
+           | Bomb =>
+             acc @ [{...gameObject, image: explosionImage, kind: Explosion}]
+           | _ => acc @ [gameObject]
+           } :
+           acc @ [gameObject],
        [],
      );
 
@@ -316,19 +331,13 @@ let draw = (state, env) => {
 
   let newGameObjects =
     state.gameObjects
-    |> updateFruits(state.slicedFruitImages, env)
+    |> updateFruits(state.slicedFruitImages, state.explosionImage, env)
     |> updateFruitWaves(
          ~launchWave,
          ~fruitImages=state.fruitImages,
          ~bombImage=state.bombImage,
        )
     |> updateGameObjects;
-
-  Draw.text(
-    ~body=string_of_int(List.length(state.blade)),
-    ~pos=(0, 0),
-    env,
-  );
 
   let newBlade =
     Env.mousePressed(env) ?
